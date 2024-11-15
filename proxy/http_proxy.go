@@ -2,12 +2,15 @@ package http_cache
 
 import (
 	"bufio"
-	"cloud.google.com/go/storage"
 	"context"
 	"fmt"
 	"log"
+	"mime"
 	"net"
 	"net/http"
+	"path/filepath"
+
+	"cloud.google.com/go/storage"
 )
 
 type StorageProxy struct {
@@ -45,14 +48,15 @@ func (proxy StorageProxy) handler(w http.ResponseWriter, r *http.Request) {
 	if key[0] == '/' {
 		key = key[1:]
 	}
-	if r.Method == "GET" {
+	switch r.Method {
+	case "GET":
 		proxy.downloadBlob(w, key)
-	} else if r.Method == "HEAD" {
+	case "HEAD":
 		proxy.checkBlobExists(w, key)
-	} else if r.Method == "POST" {
+	case "POST", "PUT":
 		proxy.uploadBlob(w, r, key)
-	} else if r.Method == "PUT" {
-		proxy.uploadBlob(w, r, key)
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
 }
 
@@ -68,6 +72,15 @@ func (proxy StorageProxy) downloadBlob(w http.ResponseWriter, name string) {
 		return
 	}
 	defer reader.Close()
+
+	// Determine MIME type
+	ext := filepath.Ext(name)
+	mimeType := mime.TypeByExtension(ext)
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", mimeType)
+
 	bufferedReader := bufio.NewReader(reader)
 	_, err = bufferedReader.WriteTo(w)
 	if err != nil {
